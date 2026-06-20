@@ -1,11 +1,11 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import connectDB from './config/database';
 import { handleRedirect } from './routes/redirect';
 import { handleShorten } from './routes/shorten';
-
-dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -35,7 +35,12 @@ app.get('/:shortCode', handleRedirect);
 // Start server
 app.listen(PORT, async () => {
   console.log(`Server is running on port ${PORT}`);
-  await connectDB();
+  const db = await connectDB();
+  if (db) {
+    console.log('Database connected successfully');
+  } else {
+    console.log('Running without database connection');
+  }
 });
 
 export default app;

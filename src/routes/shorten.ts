@@ -13,10 +13,26 @@ export async function handleShorten(req: Request, res: Response): Promise<void> 
   }
 
   try {
-    const urlRegex = /^(https?:\/\/)?([\da-z\.-]+)\.([a-z\.]{2,6})([\/\w \.-]*)*\/?$/;
-    if (!urlRegex.test(originalUrl)) {
-      res.status(400).json({ error: 'Invalid URL format' });
-      return;
+    // More lenient URL validation
+    try {
+      new URL(originalUrl);
+    } catch (e) {
+      // If URL parsing fails, try adding https://
+      try {
+        new URL('https://' + originalUrl);
+      } catch (e2) {
+        res.status(400).json({ error: 'Invalid URL format' });
+        return;
+      }
+    }
+
+    // Check if database is available
+    let dbAvailable = true;
+    try {
+      await Url.findOne();
+    } catch (e) {
+      dbAvailable = false;
+      console.warn('Database not available - using Redis-only mode');
     }
 
     // Generate short code
@@ -28,42 +44,56 @@ export async function handleShorten(req: Request, res: Response): Promise<void> 
         return;
       }
 
-      // Check if custom backhalf already exists
-      const existingUrl = await Url.findOne({ customBackhalf });
-      if (existingUrl) {
-        res.status(409).json({ error: 'Custom backhalf already in use' });
-        return;
+      if (dbAvailable) {
+        // Check if custom backhalf already exists
+        const existingUrl = await Url.findOne({ customBackhalf });
+        if (existingUrl) {
+          res.status(409).json({ error: 'Custom backhalf already in use' });
+          return;
+        }
       }
 
       shortCode = customBackhalf;
     } else {
       // Generate unique 6-character short code
       shortCode = nanoid(6);
-      
-      // Ensure uniqueness
-      let existingUrl = await Url.findOne({ shortCode });
-      let attempts = 0;
-      while (existingUrl && attempts < 10) {
-        shortCode = nanoid(6);
-        existingUrl = await Url.findOne({ shortCode });
-        attempts++;
-      }
 
-      if (existingUrl) {
-        res.status(500).json({ error: 'Failed to generate unique short code' });
-        return;
+      if (dbAvailable) {
+        // Ensure uniqueness
+        let existingUrl = await Url.findOne({ shortCode });
+        let attempts = 0;
+        while (existingUrl && attempts < 10) {
+          shortCode = nanoid(6);
+          existingUrl = await Url.findOne({ shortCode });
+          attempts++;
+        }
+
+        if (existingUrl) {
+          res.status(500).json({ error: 'Failed to generate unique short code' });
+          return;
+        }
       }
     }
 
-    // Create new URL document
-    const newUrl = await Url.create({
-      originalUrl,
-      shortCode,
-      customBackhalf: customBackhalf || undefined,
-    });
+    // Create new URL document or use Redis-only mode
+    let newUrl;
+    if (dbAvailable) {
+      newUrl = await Url.create({
+        originalUrl,
+        shortCode,
+        customBackhalf: customBackhalf || undefined,
+      });
+    } else {
+      // In Redis-only mode, create a mock URL object
+      newUrl = {
+        shortCode,
+        originalUrl,
+        createdAt: new Date(),
+      } as any;
+    }
 
     // Cache in Redis
-    await redis.setex(`url:${shortCode}`, 3600, JSON.stringify(newUrl.toObject()));
+    await redis.setex(`url:${shortCode}`, 3600, JSON.stringify(newUrl));
 
     res.status(201).json({
       shortCode: newUrl.shortCode,
