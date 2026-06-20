@@ -11,11 +11,5 @@
       "src": "/(.*)",
       "dest": "src/index.ts"
     }
-  ],
-  "env": {
-    "REDIS_URL": "@redis_url",
-    "REDIS_TOKEN": "@redis_token",
-    "NODE_ENV": "production",
-    "FRONTEND_URL": "@frontend_url"
-  }
+  ]
 }
