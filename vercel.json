@@ -13,7 +13,6 @@
     }
   ],
   "env": {
-    "MONGODB_URI": "@mongodb_uri",
     "REDIS_URL": "@redis_url",
     "REDIS_TOKEN": "@redis_token",
     "NODE_ENV": "production",
