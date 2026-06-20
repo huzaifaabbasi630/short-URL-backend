@@ -3,7 +3,6 @@ dotenv.config();
 
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import connectDB from './config/database';
 import { handleRedirect } from './routes/redirect';
 import { handleShorten } from './routes/shorten';
 
@@ -33,14 +32,9 @@ app.post('/api/v1/shorten', handleShorten);
 app.get('/:shortCode', handleRedirect);
 
 // Start server
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  const db = await connectDB();
-  if (db) {
-    console.log('Database connected successfully');
-  } else {
-    console.log('Running without database connection');
-  }
+  console.log('Running in Redis-only mode');
 });
 
 export default app;

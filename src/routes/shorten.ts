@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { nanoid } from 'nanoid';
-import Url from '../models/Url';
 import redis from '../config/redis';
 
 export async function handleShorten(req: Request, res: Response): Promise<void> {
@@ -26,15 +25,6 @@ export async function handleShorten(req: Request, res: Response): Promise<void> 
       }
     }
 
-    // Check if database is available
-    let dbAvailable = true;
-    try {
-      await Url.findOne();
-    } catch (e) {
-      dbAvailable = false;
-      console.warn('Database not available - using Redis-only mode');
-    }
-
     // Generate short code
     let shortCode: string;
     if (customBackhalf) {
@@ -44,13 +34,11 @@ export async function handleShorten(req: Request, res: Response): Promise<void> 
         return;
       }
 
-      if (dbAvailable) {
-        // Check if custom backhalf already exists
-        const existingUrl = await Url.findOne({ customBackhalf });
-        if (existingUrl) {
-          res.status(409).json({ error: 'Custom backhalf already in use' });
-          return;
-        }
+      // Check if custom backhalf already exists in Redis
+      const existingUrl = await redis.get(`url:${customBackhalf}`);
+      if (existingUrl) {
+        res.status(409).json({ error: 'Custom backhalf already in use' });
+        return;
       }
 
       shortCode = customBackhalf;
@@ -58,41 +46,30 @@ export async function handleShorten(req: Request, res: Response): Promise<void> 
       // Generate unique 6-character short code
       shortCode = nanoid(6);
 
-      if (dbAvailable) {
-        // Ensure uniqueness
-        let existingUrl = await Url.findOne({ shortCode });
-        let attempts = 0;
-        while (existingUrl && attempts < 10) {
-          shortCode = nanoid(6);
-          existingUrl = await Url.findOne({ shortCode });
-          attempts++;
-        }
+      // Ensure uniqueness in Redis
+      let existingUrl = await redis.get(`url:${shortCode}`);
+      let attempts = 0;
+      while (existingUrl && attempts < 10) {
+        shortCode = nanoid(6);
+        existingUrl = await redis.get(`url:${shortCode}`);
+        attempts++;
+      }
 
-        if (existingUrl) {
-          res.status(500).json({ error: 'Failed to generate unique short code' });
-          return;
-        }
+      if (existingUrl) {
+        res.status(500).json({ error: 'Failed to generate unique short code' });
+        return;
       }
     }
 
-    // Create new URL document or use Redis-only mode
-    let newUrl;
-    if (dbAvailable) {
-      newUrl = await Url.create({
-        originalUrl,
-        shortCode,
-        customBackhalf: customBackhalf || undefined,
-      });
-    } else {
-      // In Redis-only mode, create a mock URL object
-      newUrl = {
-        shortCode,
-        originalUrl,
-        createdAt: new Date(),
-      } as any;
-    }
+    // Create URL object
+    const newUrl = {
+      shortCode,
+      originalUrl,
+      customBackhalf: customBackhalf || undefined,
+      createdAt: new Date(),
+    };
 
-    // Cache in Redis
+    // Store in Redis (TTL: 1 hour)
     await redis.setex(`url:${shortCode}`, 3600, JSON.stringify(newUrl));
 
     res.status(201).json({
